@@ -43,6 +43,7 @@ type MessageSendParams = {
   forceDocument?: boolean;
   accountId?: string;
   replyToId?: string;
+  replyToParticipant?: string;
   threadId?: string | number;
   dryRun?: boolean;
   bestEffort?: boolean;
@@ -245,6 +246,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       accountId: params.accountId,
       payloads: normalizedPayloads,
       replyToId: params.replyToId,
+      replyToParticipant: params.replyToParticipant,
       threadId: params.threadId,
       gifPlayback: params.gifPlayback,
       forceDocument: params.forceDocument,
@@ -283,6 +285,9 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       gifPlayback: params.gifPlayback,
       accountId: params.accountId,
       agentId: params.agentId,
+      replyToId: params.replyToId,
+      replyToParticipant: params.replyToParticipant,
+      threadId: params.threadId,
       channel,
       sessionKey: params.mirror?.sessionKey,
       idempotencyKey: params.idempotencyKey ?? randomIdempotencyKey(),

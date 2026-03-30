@@ -202,6 +202,7 @@ export async function dispatchWhatsAppBufferedReply(params: {
   deliverReply: (params: {
     replyResult: ReplyPayload;
     msg: WebInboundMsg;
+    replyToMode?: "off" | "first" | "all";
     mediaLocalRoots: readonly string[];
     maxMediaBytes: number;
     textLimit: number;
@@ -227,6 +228,7 @@ export async function dispatchWhatsAppBufferedReply(params: {
   ) => void;
   replyLogger: ReturnType<typeof getChildLogger>;
   replyPipeline: WhatsAppDispatchPipeline;
+  replyToMode?: "off" | "first" | "all";
   replyResolver: typeof getReplyFromConfig;
   route: ReturnType<typeof resolveAgentRoute>;
   shouldClearGroupHistory: boolean;
@@ -261,6 +263,7 @@ export async function dispatchWhatsAppBufferedReply(params: {
         await params.deliverReply({
           replyResult: payload,
           msg: params.msg,
+          replyToMode: params.replyToMode,
           mediaLocalRoots,
           maxMediaBytes: params.maxMediaBytes,
           textLimit,

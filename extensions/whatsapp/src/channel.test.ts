@@ -19,6 +19,10 @@ import {
 import type { OpenClawConfig } from "./runtime-api.js";
 
 const hoisted = vi.hoisted(() => ({
+  sendMessageWhatsApp: vi.fn(async () => ({
+    messageId: "wa-msg-1",
+    toJid: "1555@s.whatsapp.net",
+  })),
   sendPollWhatsApp: vi.fn(async () => ({ messageId: "wa-poll-1", toJid: "1555@s.whatsapp.net" })),
   sendReactionWhatsApp: vi.fn(async () => undefined),
   handleWhatsAppAction: vi.fn(async () => ({ content: [{ type: "text", text: '{"ok":true}' }] })),
@@ -41,6 +45,7 @@ vi.mock("./runtime.js", () => ({
     },
     channel: {
       whatsapp: {
+        sendMessageWhatsApp: hoisted.sendMessageWhatsApp,
         sendPollWhatsApp: hoisted.sendPollWhatsApp,
         handleWhatsAppAction: hoisted.handleWhatsAppAction,
       },
@@ -179,6 +184,197 @@ describe("whatsappPlugin outbound sendMedia", () => {
       }),
     );
     expect(result).toMatchObject({ channel: "whatsapp", messageId: "msg-1" });
+  });
+
+  it("forwards replyToId as quotedMessageKey on outbound sends", async () => {
+    const sendWhatsApp = vi.fn(async () => ({
+      messageId: "msg-1",
+      toJid: "15551234567@s.whatsapp.net",
+    }));
+
+    const outbound = whatsappPlugin.outbound;
+    if (!outbound?.sendText) {
+      throw new Error("whatsapp outbound sendText is unavailable");
+    }
+
+    await outbound.sendText({
+      cfg: {} as never,
+      to: "whatsapp:+15551234567",
+      text: "reply",
+      replyToId: "quoted-1",
+      accountId: "default",
+      deps: { sendWhatsApp },
+    });
+
+    expect(sendWhatsApp).toHaveBeenCalledWith(
+      "whatsapp:+15551234567",
+      "reply",
+      expect.objectContaining({
+        accountId: "default",
+        quotedMessageKey: {
+          id: "quoted-1",
+          remoteJid: "15551234567@s.whatsapp.net",
+          fromMe: false,
+        },
+        verbose: false,
+      }),
+    );
+  });
+
+  it("forwards replyToParticipant as quotedMessageKey participant on group sends", async () => {
+    const sendWhatsApp = vi.fn(async () => ({
+      messageId: "msg-1",
+      toJid: "120363000000000000@g.us",
+    }));
+
+    const outbound = whatsappPlugin.outbound;
+    if (!outbound?.sendText) {
+      throw new Error("whatsapp outbound sendText is unavailable");
+    }
+
+    await outbound.sendText({
+      cfg: {} as never,
+      to: "120363000000000000@g.us",
+      text: "reply",
+      replyToId: "quoted-1",
+      replyToParticipant: "+15551234567",
+      accountId: "default",
+      deps: { sendWhatsApp },
+    });
+
+    expect(sendWhatsApp).toHaveBeenCalledWith(
+      "120363000000000000@g.us",
+      "reply",
+      expect.objectContaining({
+        quotedMessageKey: {
+          id: "quoted-1",
+          remoteJid: "120363000000000000@g.us",
+          fromMe: false,
+          participant: "15551234567@s.whatsapp.net",
+        },
+        verbose: false,
+      }),
+    );
+  });
+
+  it("quotes only the first chunk on sendFormattedText when replyToMode is first", async () => {
+    const sendWhatsApp = vi.fn(
+      async (_to: string, _text: string, _options: { quotedMessageKey?: unknown }) => ({
+        messageId: "msg-1",
+        toJid: "15551234567@s.whatsapp.net",
+      }),
+    );
+
+    const outbound = whatsappPlugin.outbound;
+    if (!outbound?.sendFormattedText) {
+      throw new Error("whatsapp outbound sendFormattedText is unavailable");
+    }
+
+    const cfg = {
+      channels: {
+        whatsapp: {
+          replyToMode: "first",
+          textChunkLimit: 3,
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    await outbound.sendFormattedText({
+      cfg,
+      to: "whatsapp:+15551234567",
+      text: "aaaaaa",
+      replyToId: "quoted-1",
+      accountId: "default",
+      deps: { sendWhatsApp },
+    });
+
+    expect(sendWhatsApp).toHaveBeenCalledTimes(2);
+    expect(sendWhatsApp).toHaveBeenNthCalledWith(
+      1,
+      "whatsapp:+15551234567",
+      "aaa",
+      expect.objectContaining({
+        quotedMessageKey: expect.objectContaining({ id: "quoted-1" }),
+      }),
+    );
+    expect(sendWhatsApp).toHaveBeenNthCalledWith(
+      2,
+      "whatsapp:+15551234567",
+      "aaa",
+      expect.not.objectContaining({
+        quotedMessageKey: expect.anything(),
+      }),
+    );
+  });
+
+  it("stops formatted chunk sending after abort", async () => {
+    const abortController = new AbortController();
+    const sendWhatsApp = vi.fn(
+      async (_to: string, _text: string, _options: { quotedMessageKey?: unknown }) => {
+        abortController.abort();
+        return {
+          messageId: "msg-1",
+          toJid: "15551234567@s.whatsapp.net",
+        };
+      },
+    );
+
+    const outbound = whatsappPlugin.outbound;
+    if (!outbound?.sendFormattedText) {
+      throw new Error("whatsapp outbound sendFormattedText is unavailable");
+    }
+
+    const cfg = {
+      channels: {
+        whatsapp: {
+          textChunkLimit: 3,
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    await expect(
+      outbound.sendFormattedText({
+        cfg,
+        to: "whatsapp:+15551234567",
+        text: "aaaaaa",
+        accountId: "default",
+        deps: { sendWhatsApp },
+        abortSignal: abortController.signal,
+      }),
+    ).rejects.toThrow("Operation aborted");
+
+    expect(sendWhatsApp).toHaveBeenCalledTimes(1);
+    expect(sendWhatsApp).toHaveBeenNthCalledWith(
+      1,
+      "whatsapp:+15551234567",
+      "aaa",
+      expect.any(Object),
+    );
+  });
+});
+
+describe("whatsappPlugin threading", () => {
+  it("resolves replyToMode from account-scoped config", () => {
+    const resolveReplyToMode = whatsappPlugin.threading?.resolveReplyToMode;
+    if (!resolveReplyToMode) {
+      throw new Error("whatsapp threading resolver is unavailable");
+    }
+
+    const cfg = {
+      channels: {
+        whatsapp: {
+          replyToMode: "off",
+          accounts: {
+            assistant: {
+              replyToMode: "all",
+            },
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    expect(resolveReplyToMode({ cfg, accountId: "assistant" })).toBe("all");
+    expect(resolveReplyToMode({ cfg, accountId: "default" })).toBe("off");
   });
 });
 
