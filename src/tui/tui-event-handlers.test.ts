@@ -10,6 +10,7 @@ type HandlerChatLog = {
   updateAssistant: (...args: unknown[]) => void;
   finalizeAssistant: (...args: unknown[]) => void;
   dropAssistant: (...args: unknown[]) => void;
+  commitPendingUser: (...args: unknown[]) => boolean;
 };
 type HandlerBtwPresenter = {
   showResult: (...args: unknown[]) => void;
@@ -23,6 +24,7 @@ type MockChatLog = {
   updateAssistant: MockFn;
   finalizeAssistant: MockFn;
   dropAssistant: MockFn;
+  commitPendingUser: MockFn;
 };
 type MockBtwPresenter = {
   showResult: MockFn;
@@ -38,6 +40,7 @@ function createMockChatLog(): MockChatLog & HandlerChatLog {
     updateAssistant: vi.fn(),
     finalizeAssistant: vi.fn(),
     dropAssistant: vi.fn(),
+    commitPendingUser: vi.fn(() => false),
   } as unknown as MockChatLog & HandlerChatLog;
 }
 
@@ -468,22 +471,20 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     expect(loadHistory).toHaveBeenCalledTimes(1);
   });
 
-  it("binds optimistic pending messages to the first gateway run id and skips history reload", () => {
-    const { state, loadHistory, isLocalRunId, handleChatEvent } = createHandlersHarness({
-      state: { activeChatRunId: null, pendingOptimisticUserMessage: true },
+  it("commits local pending messages once the gateway starts their run", () => {
+    const { state, chatLog, noteLocalRunId, handleChatEvent } = createHandlersHarness({
+      state: { activeChatRunId: null },
     });
 
+    noteLocalRunId("run-gateway");
     handleChatEvent({
       runId: "run-gateway",
       sessionKey: state.currentSessionKey,
-      state: "final",
-      message: { content: [{ type: "text", text: "done" }] },
+      state: "delta",
+      message: { content: "working" },
     });
 
-    expect(state.pendingOptimisticUserMessage).toBe(false);
-    expect(state.activeChatRunId).toBeNull();
-    expect(isLocalRunId("run-gateway")).toBe(false);
-    expect(loadHistory).not.toHaveBeenCalled();
+    expect(chatLog.commitPendingUser).toHaveBeenCalledWith("run-gateway");
   });
 
   function createConcurrentRunHarness(localContent = "partial") {
@@ -528,6 +529,65 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     });
 
     expect(chatLog.updateAssistant).toHaveBeenLastCalledWith("continued", "run-active");
+  });
+
+  it("keeps active runs alive across chat error events so fallback output can still render", () => {
+    const { state, chatLog, loadHistory, setActivityStatus, handleChatEvent } =
+      createConcurrentRunHarness("partial");
+
+    loadHistory.mockClear();
+    setActivityStatus.mockClear();
+    chatLog.addSystem.mockClear();
+    chatLog.finalizeAssistant.mockClear();
+
+    handleChatEvent({
+      runId: "run-active",
+      sessionKey: state.currentSessionKey,
+      state: "error",
+      errorMessage: "API rate limit reached",
+    });
+
+    expect(state.activeChatRunId).toBe("run-active");
+    expect(loadHistory).not.toHaveBeenCalled();
+    expect(chatLog.addSystem).toHaveBeenCalledWith(
+      "run error: API rate limit reached (waiting for fallback if configured)",
+    );
+    expect(setActivityStatus).toHaveBeenCalledWith("waiting");
+
+    handleChatEvent({
+      runId: "run-active",
+      sessionKey: state.currentSessionKey,
+      state: "final",
+      message: { content: [{ type: "text", text: "fallback ok" }] },
+    });
+
+    expect(chatLog.finalizeAssistant).toHaveBeenCalledWith("fallback ok", "run-active");
+    expect(state.activeChatRunId).toBeNull();
+  });
+
+  it("clears orphaned streaming state when an inactive final leaves no runs in flight", () => {
+    const { state, setActivityStatus, handleChatEvent } = createHandlersHarness({
+      state: { activeChatRunId: null },
+    });
+
+    handleChatEvent({
+      runId: "run-orphan",
+      sessionKey: state.currentSessionKey,
+      state: "delta",
+      message: { content: "partial" },
+    });
+    expect(state.activeChatRunId).toBe("run-orphan");
+    state.activeChatRunId = null;
+    setActivityStatus.mockClear();
+
+    handleChatEvent({
+      runId: "run-orphan",
+      sessionKey: state.currentSessionKey,
+      state: "final",
+      message: { content: [{ type: "text", text: "done" }] },
+    });
+
+    expect(setActivityStatus).toHaveBeenCalledWith("idle");
   });
 
   it("suppresses non-local empty final placeholders during concurrent runs", () => {

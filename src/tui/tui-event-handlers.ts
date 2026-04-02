@@ -14,6 +14,7 @@ type EventHandlerChatLog = {
   updateAssistant: (text: string, runId: string) => void;
   finalizeAssistant: (text: string, runId: string) => void;
   dropAssistant: (runId: string) => void;
+  commitPendingUser?: (runId: string) => boolean;
 };
 
 type EventHandlerTui = {
@@ -129,6 +130,15 @@ export function createEventHandlers(context: EventHandlerContext) {
     }
   };
 
+  const shouldClearOrphanedActivityStatus = () => !state.activeChatRunId && sessionRuns.size === 0;
+
+  const commitPendingUserForRun = (runId: string) => {
+    const committed = chatLog.commitPendingUser?.(runId) ?? false;
+    if (committed) {
+      setActivityStatus(state.activityStatus);
+    }
+  };
+
   const finalizeRun = (params: {
     runId: string;
     wasActiveRun: boolean;
@@ -139,6 +149,8 @@ export function createEventHandlers(context: EventHandlerContext) {
     flushPendingHistoryRefreshIfIdle();
     if (params.wasActiveRun) {
       setActivityStatus(params.status);
+    } else if (shouldClearOrphanedActivityStatus()) {
+      setActivityStatus("idle");
     }
     void refreshSessionInfo?.();
   };
@@ -154,6 +166,8 @@ export function createEventHandlers(context: EventHandlerContext) {
     flushPendingHistoryRefreshIfIdle();
     if (params.wasActiveRun) {
       setActivityStatus(params.status);
+    } else if (shouldClearOrphanedActivityStatus()) {
+      setActivityStatus("idle");
     }
     void refreshSessionInfo?.();
   };
@@ -232,6 +246,7 @@ export function createEventHandlers(context: EventHandlerContext) {
       }
     }
     noteSessionRun(evt.runId);
+    commitPendingUserForRun(evt.runId);
     if (!state.activeChatRunId && !isLocalBtwRunId?.(evt.runId)) {
       state.activeChatRunId = evt.runId;
       if (state.pendingOptimisticUserMessage) {
@@ -312,9 +327,16 @@ export function createEventHandlers(context: EventHandlerContext) {
     if (evt.state === "error") {
       forgetLocalBtwRunId?.(evt.runId);
       const wasActiveRun = state.activeChatRunId === evt.runId;
-      chatLog.addSystem(`run error: ${evt.errorMessage ?? "unknown"}`);
-      terminateRun({ runId: evt.runId, wasActiveRun, status: "error" });
-      maybeRefreshHistoryForRun(evt.runId);
+      if (wasActiveRun) {
+        chatLog.addSystem(
+          `run error: ${evt.errorMessage ?? "unknown"} (waiting for fallback if configured)`,
+        );
+        setActivityStatus("waiting");
+      } else {
+        chatLog.addSystem(`run error: ${evt.errorMessage ?? "unknown"}`);
+        terminateRun({ runId: evt.runId, wasActiveRun, status: "error" });
+        maybeRefreshHistoryForRun(evt.runId);
+      }
     }
     tui.requestRender();
   };
