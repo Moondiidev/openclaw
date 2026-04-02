@@ -5,7 +5,7 @@ import { loadTestCatalog } from "../../scripts/test-planner/catalog.mjs";
 import {
   createExecutionArtifacts,
   createTempArtifactWriteStream,
-  resolvePnpmCommandInvocation,
+  resolveVitestCommandInvocation,
   resolveVitestFsModuleCachePath,
 } from "../../scripts/test-planner/executor.mjs";
 import {
@@ -728,31 +728,28 @@ describe("test planner", () => {
   });
 });
 
-describe("resolvePnpmCommandInvocation", () => {
-  it("prefers the parent pnpm CLI path when npm_execpath points to pnpm", () => {
+describe("resolveVitestCommandInvocation", () => {
+  it("runs the local Vitest module with Node", () => {
     expect(
-      resolvePnpmCommandInvocation({
-        npmExecPath: "/opt/homebrew/lib/node_modules/corepack/dist/pnpm.cjs",
+      resolveVitestCommandInvocation({
+        vitestArgs: ["vitest", "run", "--config", "vitest.unit.config.ts"],
         nodeExecPath: "/usr/local/bin/node",
-        platform: "linux",
+        vitestModulePath: "/repo/node_modules/vitest/vitest.mjs",
       }),
     ).toEqual({
       command: "/usr/local/bin/node",
-      args: ["/opt/homebrew/lib/node_modules/corepack/dist/pnpm.cjs"],
+      args: ["/repo/node_modules/vitest/vitest.mjs", "run", "--config", "vitest.unit.config.ts"],
     });
   });
 
-  it("falls back to cmd.exe mediation on Windows when npm_execpath is unavailable", () => {
-    expect(
-      resolvePnpmCommandInvocation({
-        npmExecPath: "",
-        platform: "win32",
-        comSpec: "C:\\Windows\\System32\\cmd.exe",
+  it("rejects non-vitest entrypoints", () => {
+    expect(() =>
+      resolveVitestCommandInvocation({
+        vitestArgs: ["pnpm", "vitest", "run"],
+        nodeExecPath: "/usr/local/bin/node",
+        vitestModulePath: "/repo/node_modules/vitest/vitest.mjs",
       }),
-    ).toEqual({
-      command: "C:\\Windows\\System32\\cmd.exe",
-      args: ["/d", "/s", "/c", "pnpm.cmd"],
-    });
+    ).toThrow('Unsupported test planner entrypoint: pnpm. Expected "vitest".');
   });
 });
 

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   getProcessTreeRecords,
   parseCompletedTestFileLines,
@@ -26,28 +27,27 @@ const countUnitEntryFilters = (unit) => {
   return null;
 };
 
-export function resolvePnpmCommandInvocation(options = {}) {
-  const npmExecPath = typeof options.npmExecPath === "string" ? options.npmExecPath.trim() : "";
-  if (npmExecPath && path.isAbsolute(npmExecPath)) {
-    const npmExecBase = path.basename(npmExecPath).toLowerCase();
-    if (npmExecBase.startsWith("pnpm")) {
-      return {
-        command: options.nodeExecPath || process.execPath,
-        args: [npmExecPath],
-      };
-    }
-  }
+const TEST_PLANNER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_VITEST_MODULE_PATH = path.resolve(
+  TEST_PLANNER_DIR,
+  "..",
+  "..",
+  "node_modules",
+  "vitest",
+  "vitest.mjs",
+);
 
-  if (options.platform === "win32") {
-    return {
-      command: options.comSpec || "cmd.exe",
-      args: ["/d", "/s", "/c", "pnpm.cmd"],
-    };
+export function resolveVitestCommandInvocation(options = {}) {
+  const vitestArgs = Array.isArray(options.vitestArgs) ? options.vitestArgs : [];
+  const [entrypoint, ...args] = vitestArgs;
+  if (entrypoint !== "vitest") {
+    throw new Error(
+      `Unsupported test planner entrypoint: ${String(entrypoint ?? "<missing>")}. Expected "vitest".`,
+    );
   }
-
   return {
-    command: "pnpm",
-    args: [],
+    command: options.nodeExecPath || process.execPath,
+    args: [options.vitestModulePath || DEFAULT_VITEST_MODULE_PATH, ...args],
   };
 }
 
@@ -344,12 +344,6 @@ export async function executePlan(plan, options = {}) {
   const env = options.env ?? process.env;
   const artifacts = options.artifacts ?? createExecutionArtifacts(env);
   const spawnImpl = options.spawn ?? spawn;
-  const pnpmInvocation = resolvePnpmCommandInvocation({
-    npmExecPath: env.npm_execpath,
-    nodeExecPath: process.execPath,
-    platform: process.platform,
-    comSpec: env.ComSpec,
-  });
   const children = new Set();
   const windowsCiArgs = plan.runtimeCapabilities.isWindowsCi
     ? ["--dangerouslyIgnoreUnhandledErrors"]
@@ -430,7 +424,11 @@ export async function executePlan(plan, options = {}) {
             ...extraArgs,
           ]
         : [...entryArgs, ...silentArgs, ...windowsCiArgs, ...extraArgs];
-      const spawnArgs = [...pnpmInvocation.args, ...args];
+      const vitestInvocation = resolveVitestCommandInvocation({
+        vitestArgs: args,
+        nodeExecPath: process.execPath,
+      });
+      const spawnArgs = vitestInvocation.args;
       const shardLabel = getShardLabel(extraArgs);
       const artifactStem = [
         sanitizeArtifactName(unit.id),
@@ -444,7 +442,7 @@ export async function executePlan(plan, options = {}) {
       laneLogStream.write(`[test-parallel] entry=${unit.id}\n`);
       laneLogStream.write(`[test-parallel] cwd=${process.cwd()}\n`);
       laneLogStream.write(
-        `[test-parallel] command=${[pnpmInvocation.command, ...spawnArgs].join(" ")}\n\n`,
+        `[test-parallel] command=${[vitestInvocation.command, ...spawnArgs].join(" ")}\n\n`,
       );
       console.log(
         `[test-parallel] start ${unit.id} workers=${unit.maxWorkers ?? "default"} filters=${String(
@@ -673,7 +671,7 @@ export async function executePlan(plan, options = {}) {
           failureTail = formatCapturedOutputTail(output);
           failureArtifactPath = artifacts.writeTempJsonArtifact(`${artifactStem}-failure`, {
             entry: unit.id,
-            command: [pnpmInvocation.command, ...spawnArgs],
+            command: [vitestInvocation.command, ...spawnArgs],
             elapsedMs,
             error: childError ? String(childError) : null,
             exitCode: resolvedCode,
@@ -741,7 +739,7 @@ export async function executePlan(plan, options = {}) {
           childEnv.OPENCLAW_VITEST_FS_MODULE_CACHE_PATH = vitestFsModuleCachePath;
           laneLogStream.write(`[test-parallel] fsModuleCachePath=${vitestFsModuleCachePath}\n`);
         }
-        child = spawnImpl(pnpmInvocation.command, spawnArgs, {
+        child = spawnImpl(vitestInvocation.command, spawnArgs, {
           stdio: ["inherit", "pipe", "pipe"],
           env: childEnv,
           shell: false,
