@@ -20,6 +20,7 @@ describe("getSlashCommands", () => {
       { value: "on", label: "on" },
       { value: "off", label: "off" },
     ]);
+    expect(verbose?.getArgumentCompletions?.("f")).toEqual([{ value: "full", label: "full" }]);
     expect(activation?.getArgumentCompletions?.("a")).toEqual([
       { value: "always", label: "always" },
     ]);
@@ -29,6 +30,7 @@ describe("getSlashCommands", () => {
 describe("helpText", () => {
   it("includes slash command help for aliases", () => {
     const output = helpText();
+    expect(output).toContain("/verbose <on|off|full>");
     expect(output).toContain("/elevated <on|off|ask|full>");
     expect(output).toContain("/elev <on|off|ask|full>");
   });
