@@ -303,7 +303,7 @@ export function createSessionActions(context: SessionActionContext) {
       state.sessionInfo.fastMode = record.fastMode ?? state.sessionInfo.fastMode;
       state.sessionInfo.verboseLevel = record.verboseLevel ?? state.sessionInfo.verboseLevel;
       const showTools = (state.sessionInfo.verboseLevel ?? "off") !== "off";
-      chatLog.clearAll();
+      chatLog.clearAll({ preservePendingUsers: true });
       btw.clear();
       chatLog.addSystem(`session ${state.currentSessionKey}`);
       for (const entry of record.messages ?? []) {
@@ -355,10 +355,13 @@ export function createSessionActions(context: SessionActionContext) {
           );
         }
       }
+      chatLog.restorePendingUsers();
       state.historyLoaded = true;
     } catch (err) {
+      chatLog.restorePendingUsers();
       chatLog.addSystem(`history failed: ${String(err)}`);
     }
+    setActivityStatus(state.activityStatus);
     await refreshSessionInfo();
     tui.requestRender();
   };
@@ -374,6 +377,7 @@ export function createSessionActions(context: SessionActionContext) {
     state.sessionInfo.updatedAt = null;
     state.historyLoaded = false;
     clearLocalRunIds?.();
+    chatLog.clearPendingUsers();
     btw.clear();
     updateHeader();
     updateFooter();

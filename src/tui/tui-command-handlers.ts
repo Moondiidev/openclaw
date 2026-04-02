@@ -72,6 +72,7 @@ export function createCommandHandlers(context: CommandHandlerContext) {
     setActivityStatus,
     formatSessionKey,
     applySessionInfoFromPatch,
+    noteLocalRunId,
     noteLocalBtwRunId,
     forgetLocalRunId,
     forgetLocalBtwRunId,
@@ -338,7 +339,7 @@ export function createCommandHandlers(context: CommandHandlerContext) {
         break;
       case "verbose":
         if (!args) {
-          chatLog.addSystem("usage: /verbose <on|off>");
+          chatLog.addSystem("usage: /verbose <on|off|full>");
           break;
         }
         try {
@@ -481,6 +482,7 @@ export function createCommandHandlers(context: CommandHandlerContext) {
           state.sessionInfo.inputTokens = null;
           state.sessionInfo.outputTokens = null;
           state.sessionInfo.totalTokens = null;
+          chatLog.clearPendingUsers();
           tui.requestRender();
 
           await client.resetSession(state.currentSessionKey, name);
@@ -518,8 +520,8 @@ export function createCommandHandlers(context: CommandHandlerContext) {
     const runId = randomUUID();
     try {
       if (!isBtw) {
-        chatLog.addUser(text);
-        state.pendingOptimisticUserMessage = true;
+        chatLog.addPendingUser(runId, text);
+        noteLocalRunId(runId);
         setActivityStatus("sending");
       } else {
         noteLocalBtwRunId?.(runId);
@@ -541,11 +543,11 @@ export function createCommandHandlers(context: CommandHandlerContext) {
       if (isBtw) {
         forgetLocalBtwRunId?.(runId);
       }
-      if (!isBtw && state.activeChatRunId) {
-        forgetLocalRunId?.(state.activeChatRunId);
-      }
       if (!isBtw) {
-        state.pendingOptimisticUserMessage = false;
+        forgetLocalRunId?.(runId);
+        chatLog.dropPendingUser(runId);
+      }
+      if (!isBtw && state.activeChatRunId === runId) {
         state.activeChatRunId = null;
       }
       chatLog.addSystem(`${isBtw ? "btw failed" : "send failed"}: ${String(err)}`);

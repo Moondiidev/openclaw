@@ -89,4 +89,28 @@ describe("ChatLog", () => {
     expect(rendered).not.toContain("BTW: what is 17 * 19?");
     expect(chatLog.hasVisibleBtw()).toBe(false);
   });
+
+  it("preserves pending user messages across history rebuilds", () => {
+    const chatLog = new ChatLog(40);
+
+    chatLog.addPendingUser("run-1", "queued hello");
+    chatLog.clearAll({ preservePendingUsers: true });
+    chatLog.addSystem("session agent:main:main");
+    chatLog.restorePendingUsers();
+
+    const rendered = chatLog.render(120).join("\n");
+    expect(rendered).toContain("queued hello");
+    expect(chatLog.countPendingUsers()).toBe(1);
+  });
+
+  it("stops counting a pending user message once the run is committed", () => {
+    const chatLog = new ChatLog(40);
+
+    chatLog.addPendingUser("run-1", "hello");
+    expect(chatLog.countPendingUsers()).toBe(1);
+
+    expect(chatLog.commitPendingUser("run-1")).toBe(true);
+    expect(chatLog.countPendingUsers()).toBe(0);
+    expect(chatLog.render(120).join("\n")).toContain("hello");
+  });
 });

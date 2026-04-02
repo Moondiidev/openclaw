@@ -472,9 +472,14 @@ export async function runTui(opts: TuiOptions) {
     );
   };
 
-  const busyStates = new Set(["sending", "waiting", "streaming", "running"]);
+  const busyStates = new Set(["sending", "waiting", "streaming", "running", "awaiting follow-up"]);
   let statusText: Text | null = null;
   let statusLoader: Loader | null = null;
+
+  const formatPendingStatusSuffix = () => {
+    const pendingCount = chatLog.countPendingUsers();
+    return pendingCount > 0 ? ` | pending ${pendingCount}` : "";
+  };
 
   const formatElapsed = (startMs: number) => {
     const totalSeconds = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
@@ -531,12 +536,21 @@ export async function runTui(opts: TuiOptions) {
           elapsed,
           connectionStatus,
           phrases: waitingPhrase ? [waitingPhrase] : undefined,
-        }),
+        }) + formatPendingStatusSuffix(),
       );
       return;
     }
 
-    statusLoader.setMessage(`${activityStatus} • ${elapsed} | ${connectionStatus}`);
+    if (activityStatus === "awaiting follow-up") {
+      statusLoader.setMessage(
+        `awaiting follow-up event • ${elapsed} | ${connectionStatus}${formatPendingStatusSuffix()}`,
+      );
+      return;
+    }
+
+    statusLoader.setMessage(
+      `${activityStatus} • ${elapsed} | ${connectionStatus}${formatPendingStatusSuffix()}`,
+    );
   };
 
   const startStatusTimer = () => {
@@ -611,7 +625,9 @@ export async function runTui(opts: TuiOptions) {
       statusLoader?.stop();
       statusLoader = null;
       ensureStatusText();
-      const text = activityStatus ? `${connectionStatus} | ${activityStatus}` : connectionStatus;
+      const text = activityStatus
+        ? `${connectionStatus} | ${activityStatus}${formatPendingStatusSuffix()}`
+        : `${connectionStatus}${formatPendingStatusSuffix()}`;
       statusText?.setText(theme.dim(text));
     }
     lastActivityStatus = activityStatus;

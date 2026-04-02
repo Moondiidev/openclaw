@@ -10,6 +10,7 @@ export class ChatLog extends Container {
   private readonly maxComponents: number;
   private toolById = new Map<string, ToolExecutionComponent>();
   private streamingRuns = new Map<string, AssistantMessageComponent>();
+  private pendingUsers = new Map<string, UserMessageComponent>();
   private btwMessage: BtwInlineMessage | null = null;
   private toolsExpanded = false;
 
@@ -27,6 +28,11 @@ export class ChatLog extends Container {
     for (const [runId, message] of this.streamingRuns.entries()) {
       if (message === component) {
         this.streamingRuns.delete(runId);
+      }
+    }
+    for (const [runId, message] of this.pendingUsers.entries()) {
+      if (message === component) {
+        this.pendingUsers.delete(runId);
       }
     }
     if (this.btwMessage === component) {
@@ -50,11 +56,27 @@ export class ChatLog extends Container {
     this.pruneOverflow();
   }
 
-  clearAll() {
+  clearAll(opts?: { preservePendingUsers?: boolean }) {
     this.clear();
     this.toolById.clear();
     this.streamingRuns.clear();
     this.btwMessage = null;
+    if (!opts?.preservePendingUsers) {
+      this.pendingUsers.clear();
+    }
+  }
+
+  restorePendingUsers() {
+    for (const component of this.pendingUsers.values()) {
+      this.append(component);
+    }
+  }
+
+  clearPendingUsers() {
+    for (const component of this.pendingUsers.values()) {
+      this.removeChild(component);
+    }
+    this.pendingUsers.clear();
   }
 
   private createSystemMessage(text: string): Container {
@@ -70,6 +92,36 @@ export class ChatLog extends Container {
 
   addUser(text: string) {
     this.append(new UserMessageComponent(text));
+  }
+
+  addPendingUser(runId: string, text: string) {
+    const existing = this.pendingUsers.get(runId);
+    if (existing) {
+      existing.setText(text);
+      return existing;
+    }
+    const component = new UserMessageComponent(text);
+    this.pendingUsers.set(runId, component);
+    this.append(component);
+    return component;
+  }
+
+  commitPendingUser(runId: string) {
+    return this.pendingUsers.delete(runId);
+  }
+
+  dropPendingUser(runId: string) {
+    const existing = this.pendingUsers.get(runId);
+    if (!existing) {
+      return false;
+    }
+    this.removeChild(existing);
+    this.pendingUsers.delete(runId);
+    return true;
+  }
+
+  countPendingUsers() {
+    return this.pendingUsers.size;
   }
 
   private resolveRunId(runId?: string) {

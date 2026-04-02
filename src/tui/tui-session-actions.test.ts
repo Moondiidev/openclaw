@@ -56,7 +56,10 @@ describe("tui session actions", () => {
 
     const { refreshSessionInfo } = createSessionActions({
       client: { listSessions } as unknown as GatewayChatClient,
-      chatLog: { addSystem: vi.fn() } as unknown as import("./components/chat-log.js").ChatLog,
+      chatLog: {
+        addSystem: vi.fn(),
+        restorePendingUsers: vi.fn(),
+      } as unknown as import("./components/chat-log.js").ChatLog,
       btw: createBtwPresenter(),
       tui: { requestRender } as unknown as import("@mariozechner/pi-tui").TUI,
       opts: {},
@@ -162,7 +165,10 @@ describe("tui session actions", () => {
 
     const { applySessionInfoFromPatch, refreshSessionInfo } = createSessionActions({
       client: { listSessions } as unknown as GatewayChatClient,
-      chatLog: { addSystem: vi.fn() } as unknown as import("./components/chat-log.js").ChatLog,
+      chatLog: {
+        addSystem: vi.fn(),
+        restorePendingUsers: vi.fn(),
+      } as unknown as import("./components/chat-log.js").ChatLog,
       btw: createBtwPresenter(),
       tui: { requestRender: vi.fn() } as unknown as import("@mariozechner/pi-tui").TUI,
       opts: {},
@@ -254,6 +260,8 @@ describe("tui session actions", () => {
       chatLog: {
         addSystem: vi.fn(),
         clearAll: vi.fn(),
+        clearPendingUsers: vi.fn(),
+        restorePendingUsers: vi.fn(),
       } as unknown as import("./components/chat-log.js").ChatLog,
       btw,
       tui: { requestRender: vi.fn() } as unknown as import("@mariozechner/pi-tui").TUI,

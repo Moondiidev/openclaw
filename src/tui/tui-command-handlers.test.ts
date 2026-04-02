@@ -22,7 +22,10 @@ function createHarness(params?: {
   const resetSession = params?.resetSession ?? vi.fn().mockResolvedValue({ ok: true });
   const setSession = params?.setSession ?? (vi.fn().mockResolvedValue(undefined) as SetSessionMock);
   const addUser = vi.fn();
+  const addPendingUser = vi.fn();
   const addSystem = vi.fn();
+  const dropPendingUser = vi.fn();
+  const clearPendingUsers = vi.fn();
   const requestRender = vi.fn();
   const noteLocalRunId = vi.fn();
   const noteLocalBtwRunId = vi.fn();
@@ -41,7 +44,7 @@ function createHarness(params?: {
 
   const { handleCommand } = createCommandHandlers({
     client: { sendChat, patchSession, resetSession } as never,
-    chatLog: { addUser, addSystem } as never,
+    chatLog: { addUser, addPendingUser, addSystem, dropPendingUser, clearPendingUsers } as never,
     tui: { requestRender } as never,
     opts: {},
     state: state as never,
@@ -70,7 +73,10 @@ function createHarness(params?: {
     resetSession,
     setSession,
     addUser,
+    addPendingUser,
     addSystem,
+    dropPendingUser,
+    clearPendingUsers,
     requestRender,
     loadHistory,
     refreshSessionInfo,
@@ -112,12 +118,12 @@ describe("tui command handlers", () => {
   });
 
   it("forwards unknown slash commands to the gateway", async () => {
-    const { handleCommand, sendChat, addUser, addSystem, requestRender } = createHarness();
+    const { handleCommand, sendChat, addPendingUser, addSystem, requestRender } = createHarness();
 
     await handleCommand("/context");
 
     expect(addSystem).not.toHaveBeenCalled();
-    expect(addUser).toHaveBeenCalledWith("/context");
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), "/context");
     expect(sendChat).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionKey: "agent:main:main",
@@ -127,14 +133,14 @@ describe("tui command handlers", () => {
     expect(requestRender).toHaveBeenCalled();
   });
 
-  it("defers local run binding until gateway events provide a real run id", async () => {
+  it("binds local runs immediately so pending messages survive refreshes", async () => {
     const { handleCommand, noteLocalRunId, state } = createHarness();
 
     await handleCommand("/context");
 
-    expect(noteLocalRunId).not.toHaveBeenCalled();
+    expect(noteLocalRunId).toHaveBeenCalledTimes(1);
     expect(state.activeChatRunId).toBeNull();
-    expect(state.pendingOptimisticUserMessage).toBe(true);
+    expect(state.pendingOptimisticUserMessage).toBe(false);
   });
 
   it("sends /btw without hijacking the active main run", async () => {
@@ -184,13 +190,14 @@ describe("tui command handlers", () => {
 
   it("reports send failures and marks activity status as error", async () => {
     const setActivityStatus = vi.fn();
-    const { handleCommand, addSystem, state } = createHarness({
+    const { handleCommand, addSystem, dropPendingUser, state } = createHarness({
       sendChat: vi.fn().mockRejectedValue(new Error("gateway down")),
       setActivityStatus,
     });
 
     await handleCommand("/context");
 
+    expect(dropPendingUser).toHaveBeenCalledTimes(1);
     expect(addSystem).toHaveBeenCalledWith("send failed: Error: gateway down");
     expect(setActivityStatus).toHaveBeenLastCalledWith("error");
     expect(state.pendingOptimisticUserMessage).toBe(false);
@@ -212,16 +219,26 @@ describe("tui command handlers", () => {
   });
 
   it("reports disconnected status and skips gateway send when offline", async () => {
-    const { handleCommand, sendChat, addUser, addSystem, setActivityStatus } = createHarness({
-      isConnected: false,
-    });
+    const { handleCommand, sendChat, addPendingUser, addSystem, setActivityStatus } = createHarness(
+      {
+        isConnected: false,
+      },
+    );
 
     await handleCommand("/context");
 
     expect(sendChat).not.toHaveBeenCalled();
-    expect(addUser).not.toHaveBeenCalled();
+    expect(addPendingUser).not.toHaveBeenCalled();
     expect(addSystem).toHaveBeenCalledWith("not connected to gateway — message not sent");
     expect(setActivityStatus).toHaveBeenLastCalledWith("disconnected");
+  });
+
+  it("clears pending user messages before resetting the current session", async () => {
+    const { handleCommand, clearPendingUsers } = createHarness();
+
+    await handleCommand("/reset");
+
+    expect(clearPendingUsers).toHaveBeenCalledTimes(1);
   });
 
   it("rejects invalid /activation values before patching the session", async () => {
