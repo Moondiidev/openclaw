@@ -68,6 +68,40 @@ describe("resolveSkillsPromptForRun", () => {
     expect(prompt).toContain("/app/skills/github/SKILL.md");
     expect(prompt).not.toContain("/app/skills/hidden-skill/SKILL.md");
   });
+
+  it("honors disabled skillKey overrides when globalEnabled uses the skill name", () => {
+    const mixedIdEntry: SkillEntry = {
+      skill: createFixtureSkill({
+        name: "weather",
+        description: "Weather",
+        filePath: "/app/skills/weather/SKILL.md",
+        baseDir: "/app/skills/weather",
+        source: "openclaw-workspace",
+      }),
+      frontmatter: {},
+      metadata: {
+        skillKey: "weather-provider",
+      },
+    };
+
+    const prompt = resolveSkillsPromptForRun({
+      entries: [mixedIdEntry],
+      config: {
+        skills: {
+          policy: {
+            globalEnabled: ["weather"],
+            agentOverrides: {
+              writer: { disabled: ["weather-provider"] },
+            },
+          },
+        },
+      },
+      workspaceDir: "/tmp/openclaw",
+      agentId: "writer",
+    });
+
+    expect(prompt).not.toContain("/app/skills/weather/SKILL.md");
+  });
 });
 
 function createFixtureSkill(params: {

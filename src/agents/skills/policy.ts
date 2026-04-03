@@ -163,6 +163,15 @@ export function isSkillAllowedByPolicy(
     return true;
   }
   const skillKey = resolveSkillKey(entry.skill, entry);
+  const disabledSet = new Set(policy.agentDisabled);
+  const disabledCanonicalSet = new Set(
+    policy.agentDisabled
+      .map((name) => canonicalizeSkillAlias(name))
+      .filter((name) => name.length > 0),
+  );
+  if (disabledSet.has(skillKey) || disabledSet.has(entry.skill.name)) {
+    return false;
+  }
   if (policy.effectiveSet.has(skillKey)) {
     return true;
   }
@@ -170,10 +179,16 @@ export function isSkillAllowedByPolicy(
     return true;
   }
   const skillKeyAlias = canonicalizeSkillAlias(skillKey);
+  if (skillKeyAlias && disabledCanonicalSet.has(skillKeyAlias)) {
+    return false;
+  }
   if (skillKeyAlias && policy.effectiveCanonicalSet.has(skillKeyAlias)) {
     return true;
   }
   const skillNameAlias = canonicalizeSkillAlias(entry.skill.name);
+  if (skillNameAlias && disabledCanonicalSet.has(skillNameAlias)) {
+    return false;
+  }
   if (skillNameAlias && policy.effectiveCanonicalSet.has(skillNameAlias)) {
     return true;
   }
