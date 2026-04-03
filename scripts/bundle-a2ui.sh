@@ -34,14 +34,9 @@ INPUT_PATHS=(
 resolve_node_cmd() {
   local pnpm_path
   local pnpm_dir
-  if command -v node >/dev/null 2>&1; then
-    NODE_CMD=(node)
-    return
-  fi
-  if command -v node.exe >/dev/null 2>&1; then
-    NODE_CMD=(node.exe)
-    return
-  fi
+  # WSL often has Linux `node` on PATH before Windows tools, while `pnpm` is still the
+  # Windows shim under `/mnt/host/c/Program Files/nodejs/`. Prefer the Node next to that
+  # pnpm so PATH stays self-consistent for the rest of this script.
   if command -v pnpm >/dev/null 2>&1; then
     pnpm_path="$(command -v pnpm)"
     pnpm_dir="$(dirname "$pnpm_path")"
@@ -53,6 +48,14 @@ resolve_node_cmd() {
       NODE_CMD=("$pnpm_dir/node")
       return
     fi
+  fi
+  if command -v node >/dev/null 2>&1; then
+    NODE_CMD=(node)
+    return
+  fi
+  if command -v node.exe >/dev/null 2>&1; then
+    NODE_CMD=(node.exe)
+    return
   fi
   if command -v pnpm >/dev/null 2>&1; then
     NODE_CMD=(pnpm -s exec node)
@@ -114,8 +117,27 @@ ensure_node_on_path
 resolve_pnpm_cli() {
   PNPM_CLI=""
   PNPM_KIND=""
+  PNPM_NODE_CMD=()
   if [[ "${NODE_CMD[0]:-}" == "pnpm" ]]; then
     return
+  fi
+  local pnpm_path
+  local pnpm_dir
+  local global_pnpm_cjs
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm_path="$(command -v pnpm)"
+    pnpm_dir="$(dirname "$pnpm_path")"
+    global_pnpm_cjs="$pnpm_dir/node_modules/pnpm/bin/pnpm.cjs"
+    if [[ -f "$global_pnpm_cjs" ]]; then
+      PNPM_CLI="$global_pnpm_cjs"
+      PNPM_KIND="pnpm"
+      if [[ -f "$pnpm_dir/node.exe" ]]; then
+        PNPM_NODE_CMD=("$pnpm_dir/node.exe")
+      elif [[ -f "$pnpm_dir/node" ]]; then
+        PNPM_NODE_CMD=("$pnpm_dir/node")
+      fi
+      return
+    fi
   fi
   local f
   shopt -s nullglob
@@ -169,14 +191,18 @@ pnpm_cli_is_runnable() {
 
 run_pnpm() {
   if [[ -n "${PNPM_CLI:-}" ]] && pnpm_cli_is_runnable "$PNPM_CLI"; then
+    local runner=("${NODE_CMD[@]}")
+    if [[ ${#PNPM_NODE_CMD[@]} -gt 0 ]]; then
+      runner=("${PNPM_NODE_CMD[@]}")
+    fi
     local script_path="$PNPM_CLI"
-    if [[ "${NODE_CMD[0]}" == *.exe ]]; then
+    if [[ "${runner[0]}" == *.exe ]]; then
       script_path="$(to_node_path "$PNPM_CLI")"
     fi
     if [[ "${PNPM_KIND:-}" == "corepack" ]]; then
-      "${NODE_CMD[@]}" "$script_path" pnpm "$@"
+      "${runner[@]}" "$script_path" pnpm "$@"
     else
-      "${NODE_CMD[@]}" "$script_path" "$@"
+      "${runner[@]}" "$script_path" "$@"
     fi
     return
   fi
