@@ -77,30 +77,53 @@ export function assertSafeWindowsShellArgs(args, platform = process.platform) {
 }
 
 function createSpawnOptions(cmd, args, envOverride) {
-  const useShell = shouldUseShellForCommand(cmd);
-  if (useShell) {
+  if (shouldUseShellForCommand(cmd)) {
     assertSafeWindowsShellArgs(args);
   }
   return {
     cwd: uiDir,
     stdio: "inherit",
     env: envOverride ?? process.env,
-    ...(useShell ? { shell: true } : {}),
   };
 }
 
+function quoteWindowsCmdToken(token) {
+  if (token.length === 0 || /\s/.test(token)) {
+    return `"${token}"`;
+  }
+  return token;
+}
+
+function createSpawnSpec(cmd, args, envOverride) {
+  const options = createSpawnOptions(cmd, args, envOverride);
+  if (shouldUseShellForCommand(cmd)) {
+    const comspec = process.env.ComSpec ?? "cmd.exe";
+    const commandLine = [`"${cmd}"`, ...args.map(quoteWindowsCmdToken)].join(" ");
+    return {
+      cmd: comspec,
+      args: ["/d", "/c", commandLine],
+      options: {
+        ...options,
+        windowsVerbatimArguments: true,
+      },
+    };
+  }
+  return { cmd, args, options };
+}
+
 function run(cmd, args) {
+  const spec = createSpawnSpec(cmd, args);
   let child;
   try {
-    child = spawn(cmd, args, createSpawnOptions(cmd, args));
+    child = spawn(spec.cmd, spec.args, spec.options);
   } catch (err) {
-    console.error(`Failed to launch ${cmd}:`, err);
+    console.error(`Failed to launch ${spec.cmd}:`, err);
     process.exit(1);
     return;
   }
 
   child.on("error", (err) => {
-    console.error(`Failed to launch ${cmd}:`, err);
+    console.error(`Failed to launch ${spec.cmd}:`, err);
     process.exit(1);
   });
   child.on("exit", (code) => {
@@ -111,11 +134,12 @@ function run(cmd, args) {
 }
 
 function runSync(cmd, args, envOverride) {
+  const spec = createSpawnSpec(cmd, args, envOverride);
   let result;
   try {
-    result = spawnSync(cmd, args, createSpawnOptions(cmd, args, envOverride));
+    result = spawnSync(spec.cmd, spec.args, spec.options);
   } catch (err) {
-    console.error(`Failed to launch ${cmd}:`, err);
+    console.error(`Failed to launch ${spec.cmd}:`, err);
     process.exit(1);
     return;
   }
